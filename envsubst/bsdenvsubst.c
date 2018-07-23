@@ -1,17 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
+
+#include <sys/queue.h>
 
 static const struct option longOpts[] = {
     { "variables", no_argument, NULL, 'v'},
     { "help", no_argument, NULL, 'h'},
     { "version", no_argument, NULL, 'V'},
 };
-
 
 int
 check_variable_name(char * var, int len)
@@ -23,58 +24,88 @@ check_variable_name(char * var, int len)
     }
 
     for (char *c = var; *c != '\0' && (!len || (cnt < len)); c++) {
-        if(!isalpha(*c) && !isnumber(*c) && *c != '_') {
+        
+        if(!isalnum(*c) && *c != '_') {
             return (len ? 0 : cnt);
         }
         cnt++;
     }
-
     return (cnt);
-
 }
+
+typedef struct env_node_t {
+    char * var_name;
+    char * var_value;
+    TAILQ_ENTRY (env_node_t) next;
+} env_node_t;
+TAILQ_HEAD (env_head_t, env_node_t);
 
 void
-print_variable(char * name, int len)
+add_variable(struct env_head_t * el, char * str, int len)
 {
-    char * dest;
-    dest = malloc(len+1);
-    strlcpy(dest,name,len+1);
-    printf("%s\n",dest);
-    free(dest);
+    struct env_node_t *node, *it;
+    char *name;
+    char *value;
+
+    name = strndup(str, len + 1);
+    if (name == NULL) {
+        exit (ENOMEM);
+    }
+    name[len] = '\0';
+    value = getenv(name);
+
+    TAILQ_FOREACH (it, el, next) {
+        if (strcmp(name, it->var_name) == 0) {
+            free(name);
+            return;
+        }
+    }
+
+    node = malloc(sizeof(struct env_node_t));
+    if(node == NULL) {
+        exit (ENOMEM);
+    }
+
+    node->var_name = name;
+    node->var_value = strdup(value ? value : "");
+
+    if (node->var_value == NULL) {
+        exit (ENOMEM);
+    }
+
+    TAILQ_INSERT_TAIL(el, node, next);
 }
 
-void parse_args(char *val)
+int
+parse_shell_string(struct env_head_t * el, char * shell)
 {
-    char *sepv = "$";
-    char *sepbr = "}";
-    char *word, *end, *brkt, *brkb;
-    int vlen;
-
-    for (word = strstr(val, sepv);
-         word;
-         word = strstr(word, sepv)) {
-        word++;
-        if (word[0] != '{'){
-            /* looking for variable breaker */
-            vlen = check_variable_name(word, 0);
-            if(vlen) {
-                print_variable(word,vlen);
+    char *ms = "$";
+    char *me   = "}";
+    char *ws, *we;
+    int wl;
+    
+    for (ws = strstr(shell, ms); ws; ws = strstr(ws, ms)) {
+        ws++;
+        if (ws[0] != '{'){
+            wl = check_variable_name(ws, 0);
+            if(wl) {
+                add_variable(el, ws, wl);
             }
         } else {
-            word++;
-            /* looking for closing  braket */
-            if ((end = strstr(word, sepbr)) != NULL){
-                /* Looking for a variable breaker */
-                vlen = check_variable_name(word, (end - word));
-                if(vlen) {
-                    print_variable(word,vlen);
+            ws++;
+            if ((we = strstr(ws, me)) != NULL){
+                wl = check_variable_name(ws, (we - ws));
+                if(wl) {
+                    add_variable(el, ws, wl);
                 }
             }
         }
     }
+    return (0);
 }
 
-void print_error(const char *fmt, ...)
+static void
+print_error(const char *fmt, ...)
 {
     va_list ap;
 
@@ -85,7 +116,8 @@ void print_error(const char *fmt, ...)
     fprintf(stderr, "\n");
 }
 
-void print_info(const char *fmt, ...)
+static void
+print_info(const char *fmt, ...)
 {
     va_list ap;
 
@@ -128,6 +160,9 @@ main(int argc, char * argv[])
     int ch  = 0;
     int v_flag = 0;
     int longIndex;
+    struct env_head_t env_list;
+
+    TAILQ_INIT (&env_list);
 
     while ((ch = getopt_long(argc, argv, "vhV", longOpts,&longIndex)) != -1) {
         switch (ch) {
@@ -155,7 +190,14 @@ main(int argc, char * argv[])
     }
 
     if (argc == 1) {
-        parse_args(argv[0]);
+        parse_shell_string(&env_list, argv[0]);
+        if (v_flag) {
+            struct env_node_t *it;
+            TAILQ_FOREACH (it, &env_list, next) {
+                printf("%s\n",it->var_name);
+            }
+            exit (0);
+        }
     } else {
         print_error("too many arguments");
         exit (EPERM);
