@@ -3,7 +3,8 @@
 #include <errno.h>
 #include <getopt.h>
 #include <stdarg.h>
-
+#include <string.h>
+#include <ctype.h>
 
 static const struct option longOpts[] = {
     { "variables", no_argument, NULL, 'v'},
@@ -11,8 +12,67 @@ static const struct option longOpts[] = {
     { "version", no_argument, NULL, 'V'},
 };
 
-#define APP_NAME "bsdenvsubst"
 
+int
+check_variable_name(char * var, int len)
+{
+    int cnt = 0;
+
+    if (!isalpha(*var)) {
+        return (0);
+    }
+
+    for (char *c = var; *c != '\0' && (!len || (cnt < len)); c++) {
+        if(!isalpha(*c) && !isnumber(*c) && *c != '_') {
+            return (len ? 0 : cnt);
+        }
+        cnt++;
+    }
+
+    return (cnt);
+
+}
+
+void
+print_variable(char * name, int len)
+{
+    char * dest;
+    dest = malloc(len+1);
+    strlcpy(dest,name,len+1);
+    printf("%s\n",dest);
+    free(dest);
+}
+
+void parse_args(char *val)
+{
+    char *sepv = "$";
+    char *sepbr = "}";
+    char *word, *end, *brkt, *brkb;
+    int vlen;
+
+    for (word = strstr(val, sepv);
+         word;
+         word = strstr(word, sepv)) {
+        word++;
+        if (word[0] != '{'){
+            /* looking for variable breaker */
+            vlen = check_variable_name(word, 0);
+            if(vlen) {
+                print_variable(word,vlen);
+            }
+        } else {
+            word++;
+            /* looking for closing  braket */
+            if ((end = strstr(word, sepbr)) != NULL){
+                /* Looking for a variable breaker */
+                vlen = check_variable_name(word, (end - word));
+                if(vlen) {
+                    print_variable(word,vlen);
+                }
+            }
+        }
+    }
+}
 
 void print_error(const char *fmt, ...)
 {
@@ -95,7 +155,7 @@ main(int argc, char * argv[])
     }
 
     if (argc == 1) {
-//        v_args_list = parse_args(argv[0]);
+        parse_args(argv[0]);
     } else {
         print_error("too many arguments");
         exit (EPERM);
