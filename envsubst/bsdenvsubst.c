@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,13 +9,53 @@
 
 #include <sys/queue.h>
 
+typedef int bool;
+#define true 1
+#define false 0
+
+
 static const struct option longOpts[] = {
     { "variables", no_argument, NULL, 'v'},
     { "help", no_argument, NULL, 'h'},
     { "version", no_argument, NULL, 'V'},
 };
 
-int
+typedef struct env_node_t {
+    char * var_name;
+    TAILQ_ENTRY (env_node_t) next;
+} env_node_t;
+TAILQ_HEAD (env_head_t, env_node_t);
+
+typedef struct var_t {
+    char *buf;
+    int  len;
+    bool has_braket;
+    struct env_head_t list;
+} var_t;
+
+static void
+print_error(const char *fmt, ...)
+{
+    va_list ap;
+
+    fprintf(stderr, "%s: ", getprogname());
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+}
+
+
+struct env_head_t env_list;
+
+static int
+is_variable_allowed_char(char c)
+{
+    return (isalnum(c) || c == '_');
+}
+
+
+static int
 check_variable_name(char * var, int len)
 {
     int cnt = 0;
@@ -24,8 +65,8 @@ check_variable_name(char * var, int len)
     }
 
     for (char *c = var; *c != '\0' && (!len || (cnt < len)); c++) {
-        
-        if(!isalnum(*c) && *c != '_') {
+
+        if(! is_variable_allowed_char(*c)) {
             return (len ? 0 : cnt);
         }
         cnt++;
@@ -33,12 +74,49 @@ check_variable_name(char * var, int len)
     return (cnt);
 }
 
-typedef struct env_node_t {
-    char * var_name;
-    char * var_value;
-    TAILQ_ENTRY (env_node_t) next;
-} env_node_t;
-TAILQ_HEAD (env_head_t, env_node_t);
+static int
+do_expand(char * var)
+{
+    char *val = NULL;
+    struct env_node_t *it;
+
+    if (! TAILQ_EMPTY(&env_list)) {
+        TAILQ_FOREACH (it, &env_list, next) {
+            if (strcmp(var, it->var_name) == 0) {
+                val = getenv(var);
+            }
+        }
+    } else {
+        val = getenv(var);
+    }
+
+    if (val) {
+        fputs(val,stdout);
+    }
+    return val?1:0;
+}
+
+static void
+expand (var_t *v)
+{
+    v->buf[v->len] = 0;
+    if (v->len) {
+        v->buf[v->len] = 0;
+        do_expand(v->buf+((v->has_braket ? 2:1)));
+    }
+    v->len = 0;
+    v->has_braket = false;
+}
+
+static void clean (var_t *v)
+{
+    if (v->len) {
+        v->buf[v->len] = 0;
+        fputs(v->buf, stdout);
+    }
+    v->len = 0;
+    v->has_braket = false;
+}
 
 void
 add_variable(struct env_head_t * el, char * str, int len)
@@ -67,11 +145,6 @@ add_variable(struct env_head_t * el, char * str, int len)
     }
 
     node->var_name = name;
-    node->var_value = strdup(value ? value : "");
-
-    if (node->var_value == NULL) {
-        exit (ENOMEM);
-    }
 
     TAILQ_INSERT_TAIL(el, node, next);
 }
@@ -83,7 +156,7 @@ parse_shell_string(struct env_head_t * el, char * shell)
     char *me   = "}";
     char *ws, *we;
     int wl;
-    
+
     for (ws = strstr(shell, ms); ws; ws = strstr(ws, ms)) {
         ws++;
         if (ws[0] != '{'){
@@ -104,16 +177,73 @@ parse_shell_string(struct env_head_t * el, char * shell)
     return (0);
 }
 
-static void
-print_error(const char *fmt, ...)
+void
+eval_char(char  c, var_t * v)
 {
-    va_list ap;
+    if(c  == '$') {
+        if (!v->has_braket) {
+            expand(v);
+        } else {
+            clean(v);
+        }
+        v->buf[v->len++] = c;
+        return;
+    }
 
-    fprintf(stderr, "%s: ", getprogname());
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fprintf(stderr, "\n");
+    if (v->len == 1 && c == '{') {
+        v->buf[v->len++] = c;
+        v->has_braket = true;
+        return;
+    }
+
+    if (v->len && v->has_braket && c == '}') {
+        expand(v);
+        return;
+    }
+
+    if (v->len) {
+        if (is_variable_allowed_char(c)) {
+            if (v->len < PATH_MAX) {
+                v->buf[v->len++] = c;
+                return;
+            } else {
+                clean(v);
+            }
+        } else {
+            if (!v->has_braket) {
+                expand(v);
+            } else {
+                clean(v);
+            }
+        }
+    }
+
+    putc(c, stdout);
+}
+
+int
+subst_stdin()
+{
+    char varbuf[PATH_MAX + 1];
+    var_t var = { varbuf, 0, false };
+    char c;
+
+    while((c = getc(stdin)) != EOF) {
+        eval_char(c, &var);
+    }
+    if (var.len) {
+        if (! var.has_braket) {
+            expand(&var);
+        } else {
+            clean(&var);
+        }
+    }
+    if (ferror(stdin)) {
+        print_error("error while reading from the \"standard input\"");
+        /* Don't die here, we must clean the variable list before */
+        return (-EXIT_FAILURE);
+    }
+    return 1;
 }
 
 static void
@@ -160,7 +290,6 @@ main(int argc, char * argv[])
     int ch  = 0;
     int v_flag = 0;
     int longIndex;
-    struct env_head_t env_list;
 
     TAILQ_INIT (&env_list);
 
@@ -189,6 +318,12 @@ main(int argc, char * argv[])
         exit (EPERM);
     }
 
+    if (argc > 1) {
+        print_error("too many arguments");
+        exit (EPERM);
+    }
+
+    /* If a shell format variable is passed, parse it */
     if (argc == 1) {
         parse_shell_string(&env_list, argv[0]);
         if (v_flag) {
@@ -198,8 +333,13 @@ main(int argc, char * argv[])
             }
             exit (0);
         }
-    } else {
-        print_error("too many arguments");
-        exit (EPERM);
     }
+
+    if (! v_flag) {
+        if( subst_stdin() < 0) {
+            exit (EXIT_FAILURE);
+        }
+    }
+
+    exit (EXIT_SUCCESS);
 }
