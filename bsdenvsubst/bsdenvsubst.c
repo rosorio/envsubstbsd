@@ -21,7 +21,7 @@ static const struct option longOpts[] = {
 };
 
 typedef struct env_node_t {
-    char * var_name;
+    char * name;
     TAILQ_ENTRY (env_node_t) next;
 } env_node_t;
 TAILQ_HEAD (env_head_t, env_node_t);
@@ -82,7 +82,7 @@ do_expand(char * var)
 
     if (! TAILQ_EMPTY(&env_list)) {
         TAILQ_FOREACH (it, &env_list, next) {
-            if (strcmp(var, it->var_name) == 0) {
+            if (strcmp(var, it->name) == 0) {
                 val = getenv(var);
             }
         }
@@ -133,7 +133,7 @@ add_variable(struct env_head_t * el, char * str, int len)
     value = getenv(name);
 
     TAILQ_FOREACH (it, el, next) {
-        if (strcmp(name, it->var_name) == 0) {
+        if (strcmp(name, it->name) == 0) {
             free(name);
             return;
         }
@@ -144,7 +144,7 @@ add_variable(struct env_head_t * el, char * str, int len)
         exit (ENOMEM);
     }
 
-    node->var_name = name;
+    node->name = name;
 
     TAILQ_INSERT_TAIL(el, node, next);
 }
@@ -246,6 +246,26 @@ subst_stdin()
     return 1;
 }
 
+void
+sort(struct env_head_t * list)
+{
+    int change;
+    struct env_node_t *prev, *it, *nxt;
+
+    do {
+        prev = NULL;
+        change = 0;
+        TAILQ_FOREACH_SAFE (it, list, next, nxt) {
+            if (prev && strcmp(prev->name, it->name) > 0) {
+                TAILQ_REMOVE(list, prev, next);
+                TAILQ_INSERT_AFTER(list, it, prev, next);
+                change++;
+            }
+            prev = it;
+        }
+    } while (change);
+}
+
 static void
 print_info(const char *fmt, ...)
 {
@@ -262,6 +282,11 @@ usage()
 {
     printf("Usage: %s [OPTION] [SHELL-FORMAT]\n\n"
            "Substitutes the values of environment variables.\n\n"
+           "Operation mode:\n"
+           "  -v, --variables             output the variables occurring in SHELL-FORMAT\n\n"
+           "Informative output:\n"
+           "  -h, --help                  display this help and exit\n"
+           "  -V, --version               output version information and exit\n\n"
            "In normal operation mode, standard input is copied to standard output,\n"
            "with references to environment variables of the form $VARIABLE or ${VARIABLE}\n"
            "being replaced with the corresponding values.  If a SHELL-FORMAT is given,\n"
@@ -279,7 +304,7 @@ version()
 {
     printf("%s (envsubsd BSD version) 0.0.1\n"
            "License BSD: New BSD licence\n"
-           "written by Rodrigo Oosorio <rodrigo@freebsd.org>\n",
+           "Written by Rodrigo Osorio <rodrigo@freebsd.org>\n",
            getprogname());
 
 }
@@ -326,10 +351,11 @@ main(int argc, char * argv[])
     /* If a shell format variable is passed, parse it */
     if (argc == 1) {
         parse_shell_string(&env_list, argv[0]);
+        sort(&env_list);
         if (v_flag) {
             struct env_node_t *it;
             TAILQ_FOREACH (it, &env_list, next) {
-                printf("%s\n",it->var_name);
+                printf("%s\n",it->name);
             }
             exit (0);
         }
