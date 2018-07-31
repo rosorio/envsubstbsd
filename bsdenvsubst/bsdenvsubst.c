@@ -331,7 +331,7 @@ main(int argc, char * argv[])
             version();
             exit (0);
         default:
-            print_info("Try 'bsdenvsubst --help' for more information");
+            print_info("Try '%s --help' for more information", getprogname());
             exit (EPERM);
         }
     }
