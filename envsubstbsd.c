@@ -18,6 +18,7 @@ static const struct option longOpts[] = {
     { "variables", no_argument, NULL, 'v'},
     { "help", no_argument, NULL, 'h'},
     { "version", no_argument, NULL, 'V'},
+    { NULL, 0, NULL, 0},
 };
 
 typedef struct env_node_t {
