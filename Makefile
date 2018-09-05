@@ -1,5 +1,5 @@
 
-SRC=bsdenvsubst.c
-PROG=bsdenvsubst
+SRC=envsubstbsd.c
+PROG=envsubstbsd
 
 .include <bsd.prog.mk>
