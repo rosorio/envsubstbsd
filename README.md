@@ -1,5 +1,5 @@
 
-GNU tools rewrote under BSD licence. Same syntax, but a different license
+BSD licenced version of envsubst. Same tool, different license.
 
 Usage: envsubstbsd [OPTION] [SHELL-FORMAT]
 
